@@ -1,0 +1,6 @@
+.serena/
+.temp/
+AGENTS.md
+
+# Local Serena project overrides
+.serena/project.local.yml

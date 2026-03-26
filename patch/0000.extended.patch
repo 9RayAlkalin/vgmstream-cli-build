@@ -1,8 +1,8 @@
-diff --git cli/vgmstream_cli.c cli/vgmstream_cli.c
-index df10c312..4ee523a2 100644
---- cli/vgmstream_cli.c
-+++ cli/vgmstream_cli.c
-@@ -10,8 +10,11 @@
+diff --git a/cli/vgmstream_cli.c b/cli/vgmstream_cli.c
+index 5827beea..ad20e3f6 100644
+--- a/cli/vgmstream_cli.c
++++ b/cli/vgmstream_cli.c
+@@ -11,8 +11,11 @@
  #ifdef WIN32
  #include <io.h>
  #include <fcntl.h>
@@ -14,7 +14,7 @@ index df10c312..4ee523a2 100644
  #endif
  
  #ifndef STDOUT_FILENO
-@@ -26,7 +29,8 @@
+@@ -34,7 +37,8 @@
  #ifndef VGMSTREAM_VERSION
  #define VGMSTREAM_VERSION "unknown version " __DATE__
  #endif
@@ -24,14 +24,37 @@ index df10c312..4ee523a2 100644
  #define APP_INFO  APP_NAME " (" __DATE__ ")"
  
  
-@@ -86,6 +90,83 @@ static void print_usage(const char* progname, bool is_help) {
+@@ -49,7 +53,7 @@ static void print_usage(const char* progname, bool is_help) {
+             "Usage: %s [-o <outfile.wav>] [options] <infile> ...\n"
+             "Options:\n"
+             "    -o <outfile.wav>: name of output .wav file, default <infile>.wav\n"
+-            "       <outfile> wildcards can be ?s=subsong, ?n=stream name, ?f=infile\n"
++            "       <outfile> wildcards can be ?s=subsong, ?n=stream name, ?f=infile, ?b=basename, ?p=path\n"
+             "    -m: print metadata only, don't decode\n"
+             "    -i: ignore looping information and play the whole stream once\n"
+             "    -l N.n: loop count, default 2.0\n"
+@@ -67,6 +71,7 @@ static void print_usage(const char* progname, bool is_help) {
+             "    -w: allow .wav in original sample format rather than mixing to PCM16\n"
+             "    -V: print version info and supported extensions as JSON\n"
+             "    -I: print requested file info as JSON\n"
++            "    -Y: delete source file after successful conversion\n"
+             "    -h: print all commands\n"
+             , progname);
+ 
+@@ -94,6 +99,134 @@ static void print_usage(const char* progname, bool is_help) {
  
  }
  
++typedef struct {
++    char** items;
++    int count;
++    int capacity;
++} cli_file_list_t;
++
 +static bool is_directory(const char* path) {
 +#ifdef _WIN32
 +    DWORD attrs = GetFileAttributesA(path);
-+    return (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY));
++    return attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY);
 +#else
 +    struct stat st;
 +    if (stat(path, &st) != 0)
@@ -40,7 +63,52 @@ index df10c312..4ee523a2 100644
 +#endif
 +}
 +
-+static void process_directory(const char* dirpath, char*** files, int* count, int* capacity) {
++static bool has_wem_extension(const char* path) {
++    const char* ext = strrchr(path, '.');
++    return ext && strcmp(ext, ".wem") == 0;
++}
++
++static char* duplicate_path(const char* path) {
++    size_t path_len = strlen(path) + 1;
++    char* path_copy = malloc(path_len);
++    if (!path_copy)
++        return NULL;
++
++    memcpy(path_copy, path, path_len);
++    return path_copy;
++}
++
++static bool append_input_file(cli_file_list_t* file_list, const char* path) {
++    if (file_list->count >= file_list->capacity) {
++        int new_capacity = file_list->capacity > 0 ? file_list->capacity * 2 : 16;
++        char** new_items = realloc(file_list->items, new_capacity * sizeof(*new_items));
++        if (!new_items)
++            return false;
++
++        file_list->items = new_items;
++        file_list->capacity = new_capacity;
++    }
++
++    file_list->items[file_list->count] = duplicate_path(path);
++    if (!file_list->items[file_list->count])
++        return false;
++
++    file_list->count++;
++    return true;
++}
++
++static void free_input_file_list(cli_file_list_t* file_list) {
++    for (int i = 0; i < file_list->count; i++) {
++        free(file_list->items[i]);
++    }
++    free(file_list->items);
++
++    file_list->items = NULL;
++    file_list->count = 0;
++    file_list->capacity = 0;
++}
++
++static bool collect_directory_files(const char* dirpath, cli_file_list_t* file_list) {
 +    char path[CLI_PATH_LIMIT];
 +#ifdef _WIN32
 +    WIN32_FIND_DATAA ffd;
@@ -49,75 +117,75 @@ index df10c312..4ee523a2 100644
 +    snprintf(path, sizeof(path), "%s\\*", dirpath);
 +    hFind = FindFirstFileA(path, &ffd);
 +    if (hFind == INVALID_HANDLE_VALUE)
-+        return;
++        return false;
 +
 +    do {
 +        if (ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-+            if (strcmp(ffd.cFileName, ".") != 0 && strcmp(ffd.cFileName, "..") != 0) {
-+                char sub_path[CLI_PATH_LIMIT];
-+                snprintf(sub_path, sizeof(sub_path), "%s\\%s", dirpath, ffd.cFileName);
-+                process_directory(sub_path, files, count, capacity);
++            if (strcmp(ffd.cFileName, ".") == 0 || strcmp(ffd.cFileName, "..") == 0)
++                continue;
++
++            snprintf(path, sizeof(path), "%s\\%s", dirpath, ffd.cFileName);
++            if (!collect_directory_files(path, file_list)) {
++                FindClose(hFind);
++                return false;
 +            }
 +        }
-+        else {
-+            const char* ext = strrchr(ffd.cFileName, '.');
-+            if (ext && strcmp(ext, ".wem") == 0) {
-+                if (*count >= *capacity) {
-+                    *capacity *= 2;
-+                    *files = realloc(*files, *capacity * sizeof(char*));
-+                }
-+                char file_path[CLI_PATH_LIMIT];
-+                snprintf(file_path, sizeof(file_path), "%s\\%s", dirpath, ffd.cFileName);
-+                (*files)[*count] = strdup(file_path);
-+                (*count)++;
++        else if (has_wem_extension(ffd.cFileName)) {
++            snprintf(path, sizeof(path), "%s\\%s", dirpath, ffd.cFileName);
++            if (!append_input_file(file_list, path)) {
++                FindClose(hFind);
++                return false;
 +            }
 +        }
 +    } while (FindNextFileA(hFind, &ffd) != 0);
++
 +    FindClose(hFind);
 +#else
-+    DIR *dir;
-+    struct dirent *entry;
++    DIR* dir = opendir(dirpath);
++    struct dirent* entry;
 +
-+    dir = opendir(dirpath);
-+    if (!dir) return;
++    if (!dir)
++        return false;
 +
 +    while ((entry = readdir(dir)) != NULL) {
++        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
++            continue;
++
 +        snprintf(path, sizeof(path), "%s/%s", dirpath, entry->d_name);
 +
 +        if (is_directory(path)) {
-+            if (strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0) {
-+                process_directory(path, files, count, capacity);
++            if (!collect_directory_files(path, file_list)) {
++                closedir(dir);
++                return false;
 +            }
 +        }
-+        else {
-+            const char* ext = strrchr(entry->d_name, '.');
-+            if (ext && strcmp(ext, ".wem") == 0) {
-+                if (*count >= *capacity) {
-+                    *capacity *= 2;
-+                    *files = realloc(*files, *capacity * sizeof(char*));
-+                }
-+                (*files)[*count] = strdup(path);
-+                (*count)++;
++        else if (has_wem_extension(entry->d_name)) {
++            if (!append_input_file(file_list, path)) {
++                closedir(dir);
++                return false;
 +            }
 +        }
 +    }
++
 +    closedir(dir);
 +#endif
++
++    return true;
 +}
 +
  static bool parse_config(cli_config_t* cfg, int argc, char** argv) {
-     int opt;
+     /* non-zero defaults */
+     cfg->loop_count = 2.0;
+@@ -116,7 +249,7 @@ getopt_start:
+     // is found). BSD's getopt seem to behave like REQUIRE_ORDER and ignores '+'.
  
-@@ -99,7 +180,7 @@ static bool parse_config(cli_config_t* cfg, int argc, char** argv) {
-     optind = 1; /* reset getopt's ugly globals (needed in wasm that may call same main() multiple times) */
- 
-     /* read config */
--    while ((opt = getopt(argc, argv, "o:l:f:d:ipPcmxeLEFrgb2:s:tTk:K:hOvD:S:B:VIwW:")) != -1) {
-+    while ((opt = getopt(argc, argv, "o:l:f:d:ipPcmxeLEFrgb2:s:tTk:K:hOvD:S:B:VIwW:Y")) != -1) {
+     // read config
+-    while ((opt = getopt(argc, argv, "+o:l:f:d:ipPcmxeLEFrgb2:s:tTk:K:hOvD:S:B:VIwW:")) != -1) {
++    while ((opt = getopt(argc, argv, "+o:l:f:d:ipPcmxeLEFrgb2:s:tTk:K:hOvD:S:B:VIwW:Y")) != -1) {
          switch (opt) {
              case 'o':
                  cfg->outfilename = optarg;
-@@ -211,6 +292,9 @@ static bool parse_config(cli_config_t* cfg, int argc, char** argv) {
+@@ -228,6 +361,9 @@ getopt_start:
              case '2':
                  cfg->stereo_track = atoi(optarg) + 1;
                  break;
@@ -127,81 +195,26 @@ index df10c312..4ee523a2 100644
  
              case 'h':
                  print_usage(argv[0], true);
-@@ -231,25 +315,50 @@ static bool parse_config(cli_config_t* cfg, int argc, char** argv) {
-     }
+@@ -641,9 +777,37 @@ static bool convert_subsongs(cli_config_t* cfg) {
+     return true;
+ }
  
-     /* filenames go last in POSIX getopt, not so in glibc getopt */ //TODO unify
--    if (optind != argc - 1) {
-+    if (optind >= argc) {
-+        fprintf(stderr, "missing input file\n");
-+        print_usage(argv[0], 0);
-+        goto fail;
-+    }
++static bool convert_input_file(cli_config_t* cfg, const char* infilename) {
++    bool res;
 +
-+    /* expand directory inputs */
-+    int capacity = 10;
-+    int count = 0;
-+    char** expanded_files = malloc(capacity * sizeof(char*));
-+    if (!expanded_files) goto fail;
- 
--        /* check there aren't commands after filename */
-     for (int i = optind; i < argc; i++) {
--            if (argv[i][0] == '-') {
--                fprintf(stderr, "input files must go after options\n");
--                goto fail;
-+        if (is_directory(argv[i])) {
-+            process_directory(argv[i], &expanded_files, &count, &capacity);
-+        } else {
-+            if (count >= capacity) {
-+                capacity *= 2;
-+                expanded_files = realloc(expanded_files, capacity * sizeof(char*));
-             }
-+            expanded_files[count] = strdup(argv[i]);
-+            count++;
-         }
-     }
- 
-+    if (count == 0 && (argc - optind > 0)) {
-+        fprintf(stderr, "no matching .wem files found in input directories\n");
-+        free(expanded_files);
-+        goto fail;
-+    }
++    cfg->infilename = infilename;
++    if (cfg->outfilename_config)
++        cfg->outfilename = NULL;
 +
-+    if (count > 0) {
-+        cfg->infilenames = expanded_files;
-+        cfg->infilenames_count = count;
-+        cfg->expanded_infilenames = expanded_files;
-+        cfg->infiles_need_free = true;
++    if (cfg->subsong_index > 0 && cfg->subsong_end != 0) {
++        res = convert_subsongs(cfg);
 +    }
 +    else {
-+        free(expanded_files);
-         cfg->infilenames = &argv[optind];
-         cfg->infilenames_count = argc - optind;
--    if (cfg->infilenames_count <= 0) {
--        fprintf(stderr, "missing input file\n");
--        print_usage(argv[0], 0);
--        goto fail;
-     }
- 
++        cfg->subsong_current_index = cfg->subsong_index;
++        res = convert_file(cfg);
++    }
 +
-     if (cfg->outfilename && strchr(cfg->outfilename, '?') != NULL) {
-         cfg->outfilename_config = cfg->outfilename;
-         cfg->outfilename = NULL;
-@@ -559,7 +668,7 @@ static bool convert_file(cli_config_t* cfg) {
-     write_file(vgmstream, cfg);
- 
-     /* try again with reset (for testing, simulates a seek to 0 after changing internal state)
--     * (could simulate by seeking to last sample then to 0, too) */
-+     * (could be simulated by seeking to last sample then to 0, too) */
-     if (cfg->test_reset) {
-         char outfilename_reset[CLI_PATH_LIMIT];
-         snprintf(outfilename_reset, sizeof(outfilename_reset), "%s.reset.wav", cfg->outfilename);
-@@ -572,6 +681,16 @@ static bool convert_file(cli_config_t* cfg) {
-     }
- 
-     libvgmstream_free(vgmstream);
-+
-+    if (cfg->delete_source) {
++    if (res && cfg->delete_source) {
 +        if (remove(cfg->infilename) == 0) {
 +            printf("source file deleted: %s\n", cfg->infilename);
 +        }
@@ -210,44 +223,69 @@ index df10c312..4ee523a2 100644
 +        }
 +    }
 +
-     return true;
++    return res;
++}
++
+ int main(int argc, char** argv) {
+     cli_config_t cfg = {0};
+     bool res, ok;
++    int processed_file_count = 0;
  
- fail:
-@@ -650,6 +769,18 @@ int main(int argc, char** argv) {
+     libvgmstream_set_log(0, NULL);
+ 
+@@ -673,23 +837,33 @@ int main(int argc, char** argv) {
+             continue;
          }
+ 
+-        // current name, to avoid passing params all the time
+-        cfg.infilename = argv[i];
+-        if (cfg.outfilename_config)
+-            cfg.outfilename = NULL;
++        if (is_directory(argv[i])) {
++            cli_file_list_t file_list = {0};
+ 
+-        if (cfg.subsong_index > 0 && cfg.subsong_end != 0) {
+-            res = convert_subsongs(&cfg);
+-            //if (!res) goto fail;
+-            if (res) ok = true;
+-        }
+-        else {
+-            cfg.subsong_current_index = cfg.subsong_index;
++            if (!collect_directory_files(argv[i], &file_list) || file_list.count <= 0) {
++                fprintf(stderr, "no .wem files found in directory: %s\n", argv[i]);
++                free_input_file_list(&file_list);
++                continue;
++            }
++
++            for (int j = 0; j < file_list.count; j++) {
++                processed_file_count++;
++                res = convert_input_file(&cfg, file_list.items[j]);
++                if (res) ok = true;
++            }
+ 
+-            res = convert_file(&cfg);
+-            //if (!res) goto fail;
+-            if (res) ok = true;
++            free_input_file_list(&file_list);
++            continue;
+         }
++
++        processed_file_count++;
++        res = convert_input_file(&cfg, argv[i]);
++        //if (!res) goto fail;
++        if (res) ok = true;
++    }
++
++    if (processed_file_count > 0) {
++        printf("\nFinished processing %d file(s).\n", processed_file_count);
      }
  
-+    if (cfg.infilenames_count > 0) {
-+        printf("\nFinished processing %d file(s).\n", cfg.infilenames_count);
-+    }
-+
-+    /* free memory from expanded filenames */
-+    if (cfg.infiles_need_free) {
-+        for (int i = 0; i < cfg.infilenames_count; i++) {
-+            free(cfg.expanded_infilenames[i]);
-+        }
-+        free(cfg.expanded_infilenames);
-+    }
-+
      /* ok if at least one succeeds, for programs that check result code */
-     if (!ok)
-         goto fail;
-diff --git cli/vgmstream_cli.h cli/vgmstream_cli.h
-index e6bb3237..91c9f341 100644
---- cli/vgmstream_cli.h
-+++ cli/vgmstream_cli.h
-@@ -11,6 +11,10 @@ typedef struct {
-     int infilenames_count;
-     const char* infilename;
- 
-+    /* internal state for file list expansion */
-+    char** expanded_infilenames;
-+    bool infiles_need_free;
-+
-     const char* outfilename_config;
-     const char* outfilename;
- 
-@@ -51,6 +55,7 @@ typedef struct {
+diff --git a/cli/vgmstream_cli.h b/cli/vgmstream_cli.h
+index 23e5b68b..71db5ec2 100644
+--- a/cli/vgmstream_cli.h
++++ b/cli/vgmstream_cli.h
+@@ -50,6 +50,7 @@ typedef struct {
      bool decode_only;
      bool test_reset;
      bool validate_extensions;
@@ -255,10 +293,10 @@ index e6bb3237..91c9f341 100644
      int seek_samples1;
      int seek_samples2;
      int downmix_channels;
-diff --git cli/vgmstream_cli_utils.c cli/vgmstream_cli_utils.c
-index 0c928368..1deb90ae 100644
---- cli/vgmstream_cli_utils.c
-+++ cli/vgmstream_cli_utils.c
+diff --git a/cli/vgmstream_cli_utils.c b/cli/vgmstream_cli_utils.c
+index b77a4a3b..498f9d8f 100644
+--- a/cli/vgmstream_cli_utils.c
++++ b/cli/vgmstream_cli_utils.c
 @@ -21,6 +21,8 @@ static void clean_filename(char* dst, int clean_paths) {
  void replace_filename(char* dst, size_t dstsize, cli_config_t* cfg, libvgmstream_t* vgmstream) {
      int subsong;
@@ -268,27 +306,23 @@ index 0c928368..1deb90ae 100644
      char buf[CLI_PATH_LIMIT];
      char tmp[CLI_PATH_LIMIT];
  
-@@ -64,6 +66,49 @@ void replace_filename(char* dst, size_t dstsize, cli_config_t* cfg, libvgmstream
+@@ -64,6 +66,43 @@ void replace_filename(char* dst, size_t dstsize, cli_config_t* cfg, libvgmstream
              pos[1] = 's'; /* use %s */
              snprintf(tmp, sizeof(tmp), buf, cfg->infilename);
          }
 +        else if (pos[1] == 'b') {
-+            const char *p_start, *p_end;
++            const char* p_start;
++            char* p_end;
 +
-+            /* get basename: filename without extension */
 +            p_start = strrchr(cfg->infilename, '/');
 +            if (!p_start) p_start = strrchr(cfg->infilename, '\\');
 +            if (p_start) p_start += 1;
 +            else p_start = cfg->infilename;
 +
-+            /* copy filename only */
-+            strncpy(basename, p_start, sizeof(basename));
-+            basename[sizeof(basename)-1] = '\0';
-+
-+            /* remove extension */
++            snprintf(basename, sizeof(basename), "%s", p_start);
 +            p_end = strrchr(basename, '.');
 +            if (p_end != NULL && p_end != basename) {
-+                basename[p_end - basename] = '\0';
++                *p_end = '\0';
 +            }
 +
 +            pos[0] = '%';
@@ -296,18 +330,16 @@ index 0c928368..1deb90ae 100644
 +            snprintf(tmp, sizeof(tmp), buf, basename);
 +        }
 +        else if (pos[1] == 'p') {
-+            const char *p_end;
++            const char* p_end;
 +
-+            /* get path */
 +            p_end = strrchr(cfg->infilename, '/');
 +            if (!p_end) p_end = strrchr(cfg->infilename, '\\');
 +
 +            if (p_end) {
-+                /* copy path including separator */
-+                strncpy(path, cfg->infilename, p_end - cfg->infilename + 1);
-+                path[p_end - cfg->infilename + 1] = '\0';
-+            } else {
-+                /* no path component */
++                size_t path_len = (size_t)(p_end - cfg->infilename + 1);
++                snprintf(path, sizeof(path), "%.*s", (int)path_len, cfg->infilename);
++            }
++            else {
 +                path[0] = '\0';
 +            }
 +
