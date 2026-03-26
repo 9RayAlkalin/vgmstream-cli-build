@@ -12,6 +12,17 @@ jobs:
       - name: Checkout local repository
         uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Install injector dependencies
+        run: uv sync --locked
+
       - name: Clone vgmstream
         run: git clone https://github.com/vgmstream/vgmstream.git
 
@@ -19,14 +30,15 @@ jobs:
         working-directory: ./vgmstream
         run: git fetch --prune --tags
 
-      - name: Apply patches
-        working-directory: ./vgmstream
+      - name: Apply CLI overlay and export audit patch
         shell: pwsh
-        run: |
-          Get-ChildItem ../patch/*.patch | Sort-Object Name | ForEach-Object {
-            Write-Host "Applying patch: $($_.Name)"
-            git apply --ignore-whitespace -v $_.FullName
-          }
+        run: uv run vgmstream-cli-build sync --repo-root ./vgmstream --workspace-root .
+
+      - name: Upload audit snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-overlay-audit
+          path: audit/cli-overlay.audit.patch
 
       - name: Get version
         id: version
@@ -65,6 +77,17 @@ jobs:
       - name: Checkout local repository
         uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Install injector dependencies
+        run: uv sync --locked
+
       - name: Clone vgmstream
         run: git clone https://github.com/vgmstream/vgmstream.git
 
@@ -72,13 +95,9 @@ jobs:
         working-directory: ./vgmstream
         run: git fetch --prune --tags
 
-      - name: Apply patches
-        working-directory: ./vgmstream
-        run: |
-          for patch_file in ../patch/*.patch; do
-            echo "Applying patch: ${patch_file}"
-            git apply --ignore-whitespace -v "${patch_file}"
-          done
+      - name: Apply CLI overlay and export audit patch
+        shell: pwsh
+        run: uv run vgmstream-cli-build sync --repo-root ./vgmstream --workspace-root .
 
       - name: Get version
         id: version
@@ -200,7 +219,7 @@ jobs:
           tag_name: ${{ needs.build-windows.outputs.version }}
           name: "vgmstream-cli ${{ needs.build-windows.outputs.version }}"
           body: |
-            Automated build of modified vgmstream-cli.
+            Automated build of overlay-injected vgmstream-cli.
 
             **Modifications:**
             - Adds wildcards for output path: `?p` (source path) and `?b` (source basename).
@@ -208,4 +227,5 @@ jobs:
             - Adds `-Y` option to delete source file after transcoding (DANGEROUS).
           files: |
             vgmstream-win64.zip
-            vgmstream-linux-cli.zip 
+            vgmstream-linux-cli.zip
+            artifacts/cli-overlay-audit/cli-overlay.audit.patch

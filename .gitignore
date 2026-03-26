@@ -1,6 +1,9 @@
 .serena/
 .temp/
 AGENTS.md
+.venv/
+__pycache__/
+.pytest_cache/
 
 # Local Serena project overrides
 .serena/project.local.yml

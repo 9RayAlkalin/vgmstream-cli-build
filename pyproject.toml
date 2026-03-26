@@ -1,0 +1,22 @@
+[project]
+name = "vgmstream-cli-build"
+version = "0.1.0"
+description = "Overlay injector and audit tooling for customized vgmstream CLI builds."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "tree-sitter>=0.25.0",
+    "tree-sitter-c>=0.24.1",
+]
+
+[project.scripts]
+vgmstream-cli-build = "vgmstream_cli_build.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0",
+]
