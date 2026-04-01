@@ -15,10 +15,12 @@ from .c_tree import (
 
 
 TARGET_FILES = (
+    Path("cli/CMakeLists.txt"),
     Path("cli/vgmstream_cli.c"),
     Path("cli/vgmstream_cli.h"),
     Path("cli/vgmstream_cli_utils.c"),
     Path("cli/virace_cli_ext.h"),
+    Path("src/CMakeLists.txt"),
 )
 
 DEFAULT_AUDIT_PATCH = Path("audit/cli-overlay.audit.patch")
@@ -159,8 +161,20 @@ def update_function_region(path: Path, function_name: str, updater) -> None:
         write_text(path, parsed.replace_node_text(node, updated_region))
 
 
-def insert_before_node(path: Path, node_getter, block: str) -> None:
+def insert_before_node(path: Path, node_getter, block: str, marker_begin: str | None = None, marker_end: str | None = None) -> None:
     parsed = ParsedCFile.from_path(path)
+    if marker_begin and marker_end and marker_begin in parsed.text:
+        updated = parsed.text
+        start = updated.index(marker_begin)
+        end = updated.index(marker_end, start) + len(marker_end)
+        updated = updated[:start] + block + updated[end:]
+        search_from = start + len(block)
+        while marker_begin in updated[search_from:]:
+            dup_start = updated.index(marker_begin, search_from)
+            dup_end = updated.index(marker_end, dup_start) + len(marker_end)
+            updated = updated[:dup_start] + updated[dup_end:]
+        write_text(path, updated)
+        return
     if block in parsed.text:
         return
     node = node_getter(parsed)
@@ -203,6 +217,37 @@ def copy_overlay_header(paths: InjectorPaths) -> None:
         raise InjectionError(f"Overlay header not found: {source}")
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+
+
+def apply_vgmstream_cli_cmakelists(paths: InjectorPaths) -> None:
+    path = paths.repo_root / "cli/CMakeLists.txt"
+    newline = detect_newline(path.read_text(encoding="utf-8"))
+    block = normalize_newlines("\t\ttarget_link_options(vgmstream_cli PRIVATE /ENTRY:wmainCRTStartup)\n", newline)
+    updated = insert_after_line(
+        path.read_text(encoding="utf-8"),
+        "if(MSVC)",
+        block,
+        "Windows CMake unicode entrypoint",
+    )
+    write_text(path, updated)
+
+
+def apply_libvgmstream_cmakelists(paths: InjectorPaths) -> None:
+    path = paths.repo_root / "src/CMakeLists.txt"
+    newline = detect_newline(path.read_text(encoding="utf-8"))
+    block = normalize_newlines(
+        "if(WIN32)\n"
+        "\ttarget_compile_definitions(libvgmstream PRIVATE VGM_STDIO_UNICODE)\n"
+        "endif()\n",
+        newline,
+    )
+    updated = insert_after_line(
+        path.read_text(encoding="utf-8"),
+        "setup_target(libvgmstream)",
+        block,
+        "libvgmstream Windows unicode stdio",
+    )
+    write_text(path, updated)
 
 
 def apply_vgmstream_cli_h(paths: InjectorPaths) -> None:
@@ -349,6 +394,8 @@ static bool convert_input_file(cli_config_t* cfg, const char* infilename) {
 """,
             newline,
         ),
+        marker_begin="/* VIRACE_EXT_CONVERT_INPUT_FILE_BEGIN */",
+        marker_end="/* VIRACE_EXT_CONVERT_INPUT_FILE_END */",
     )
     replace_function_region_once(
         path,
@@ -417,6 +464,8 @@ for (int i = 1; i < argc; i++) {
 
 def apply_overlay(paths: InjectorPaths) -> None:
     copy_overlay_header(paths)
+    apply_vgmstream_cli_cmakelists(paths)
+    apply_libvgmstream_cmakelists(paths)
     apply_vgmstream_cli_c(paths)
     apply_vgmstream_cli_h(paths)
     apply_vgmstream_cli_utils(paths)

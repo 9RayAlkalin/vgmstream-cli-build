@@ -167,6 +167,49 @@ CLI_UTILS_C = textwrap.dedent(
     """
 )
 
+CLI_CMAKELISTS = textwrap.dedent(
+    """\
+    # CLI
+
+    add_executable(vgmstream_cli
+    \tvgmstream_cli.c vgmstream_cli_utils.c wav_utils.c windows_utils.c)
+
+    set_target_properties(vgmstream_cli PROPERTIES
+    \tPREFIX ""
+    \tOUTPUT_NAME "vgmstream-cli")
+
+    target_link_libraries(vgmstream_cli PUBLIC libvgmstream)
+
+    setup_target(vgmstream_cli TRUE)
+
+    if(WIN32)
+    \ttarget_compile_definitions(vgmstream_cli PRIVATE _CONSOLE UNICODE _UNICODE VGM_STDIO_UNICODE)
+
+    \ttarget_link_libraries(vgmstream_cli PUBLIC getopt)
+
+    \ttarget_include_directories(vgmstream_cli PRIVATE
+    \t\t${VGM_BINARY_DIR}
+    \t\t${VGM_SOURCE_DIR}/ext_libs/Getopt)
+
+    \tif(MSVC)
+    \t\tadd_dependencies(vgmstream_cli version_h)
+    \telseif(MINGW)
+    \t\tif(VGMSTREAM_VERSION)
+    \t\t\ttarget_compile_definitions(vgmstream_cli PRIVATE VGMSTREAM_VERSION="${VGMSTREAM_VERSION}")
+    \t\tendif()
+    \tendif()
+    endif()
+    """
+)
+
+SRC_CMAKELISTS = textwrap.dedent(
+    """\
+    add_library(libvgmstream STATIC ${libvgmstream_sources} ${libvgmstream_headers})
+
+    setup_target(libvgmstream)
+    """
+)
+
 
 def create_git_repo(repo_root: Path) -> None:
     subprocess.run(["git", "init"], cwd=repo_root, check=True)
@@ -187,9 +230,11 @@ def test_apply_overlay_and_export_audit(tmp_path: Path) -> None:
     (repo_root / "cli").mkdir(parents=True)
     (repo_root / "src").mkdir(parents=True)
     (repo_root / "version.h").write_text("#define VGMSTREAM_VERSION 1\n", encoding="utf-8")
+    (repo_root / "src/CMakeLists.txt").write_text(SRC_CMAKELISTS, encoding="utf-8")
     (repo_root / "cli/vgmstream_cli.c").write_text(CLI_C, encoding="utf-8")
     (repo_root / "cli/vgmstream_cli.h").write_text(CLI_H, encoding="utf-8")
     (repo_root / "cli/vgmstream_cli_utils.c").write_text(CLI_UTILS_C, encoding="utf-8")
+    (repo_root / "cli/CMakeLists.txt").write_text(CLI_CMAKELISTS, encoding="utf-8")
     create_git_repo(repo_root)
 
     paths = InjectorPaths.resolve(workspace_root=workspace_root, repo_root=repo_root)
@@ -209,6 +254,8 @@ def test_apply_overlay_and_export_audit(tmp_path: Path) -> None:
     assert "virace_extract_basename_without_extension" in cli_utils
     assert overlay_copy.startswith("#ifndef _VIRACE_CLI_EXT_H_")
     assert "cli/virace_cli_ext.h" in audit_text
+    assert "cli/CMakeLists.txt" in audit_text
+    assert "src/CMakeLists.txt" in audit_text
 
 
 def test_apply_overlay_uses_wide_windows_path_helpers(tmp_path: Path) -> None:
@@ -222,9 +269,11 @@ def test_apply_overlay_uses_wide_windows_path_helpers(tmp_path: Path) -> None:
     (repo_root / "cli").mkdir(parents=True)
     (repo_root / "src").mkdir(parents=True)
     (repo_root / "version.h").write_text("#define VGMSTREAM_VERSION 1\n", encoding="utf-8")
+    (repo_root / "src/CMakeLists.txt").write_text(SRC_CMAKELISTS, encoding="utf-8")
     (repo_root / "cli/vgmstream_cli.c").write_text(CLI_C, encoding="utf-8")
     (repo_root / "cli/vgmstream_cli.h").write_text(CLI_H, encoding="utf-8")
     (repo_root / "cli/vgmstream_cli_utils.c").write_text(CLI_UTILS_C, encoding="utf-8")
+    (repo_root / "cli/CMakeLists.txt").write_text(CLI_CMAKELISTS, encoding="utf-8")
     create_git_repo(repo_root)
 
     paths = InjectorPaths.resolve(workspace_root=workspace_root, repo_root=repo_root)
@@ -235,8 +284,164 @@ def test_apply_overlay_uses_wide_windows_path_helpers(tmp_path: Path) -> None:
 
     assert "GetFileAttributesW" in overlay_copy
     assert "FindFirstFileW" in overlay_copy
+    assert "FindNextFileW" in overlay_copy
     assert "MultiByteToWideChar" in overlay_copy
     assert "WideCharToMultiByte" in overlay_copy
     assert "_wremove" in overlay_copy
     assert "return remove(path);" in overlay_copy
     assert "virace_remove_path(cfg->infilename)" in cli_c
+
+    cli_cmakelists = (repo_root / "cli/CMakeLists.txt").read_text(encoding="utf-8")
+    src_cmakelists = (repo_root / "src/CMakeLists.txt").read_text(encoding="utf-8")
+    assert "target_link_options(vgmstream_cli PRIVATE /ENTRY:wmainCRTStartup)" in cli_cmakelists
+    assert "target_compile_definitions(libvgmstream PRIVATE VGM_STDIO_UNICODE)" in src_cmakelists
+
+
+def test_apply_overlay_is_idempotent_for_convert_input_file_block(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    repo_root = tmp_path / "upstream"
+    overlay_header_source = Path("overlay/cli/virace_cli_ext.h")
+
+    (workspace_root / "overlay/cli").mkdir(parents=True)
+    (workspace_root / "overlay/cli/virace_cli_ext.h").write_text(overlay_header_source.read_text(encoding="utf-8"), encoding="utf-8")
+
+    (repo_root / "cli").mkdir(parents=True)
+    (repo_root / "src").mkdir(parents=True)
+    (repo_root / "version.h").write_text("#define VGMSTREAM_VERSION 1\n", encoding="utf-8")
+    (repo_root / "src/CMakeLists.txt").write_text(SRC_CMAKELISTS, encoding="utf-8")
+    (repo_root / "cli/vgmstream_cli.c").write_text(CLI_C, encoding="utf-8")
+    (repo_root / "cli/vgmstream_cli.h").write_text(CLI_H, encoding="utf-8")
+    (repo_root / "cli/vgmstream_cli_utils.c").write_text(CLI_UTILS_C, encoding="utf-8")
+    (repo_root / "cli/CMakeLists.txt").write_text(CLI_CMAKELISTS, encoding="utf-8")
+    create_git_repo(repo_root)
+
+    paths = InjectorPaths.resolve(workspace_root=workspace_root, repo_root=repo_root)
+    apply_overlay(paths)
+    apply_overlay(paths)
+
+    cli_c = (repo_root / "cli/vgmstream_cli.c").read_text(encoding="utf-8")
+
+    assert cli_c.count("/* VIRACE_EXT_CONVERT_INPUT_FILE_BEGIN */") == 1
+    assert cli_c.count("static bool convert_input_file(cli_config_t* cfg, const char* infilename)") == 1
+
+
+def test_apply_overlay_replaces_legacy_convert_input_file_block(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    repo_root = tmp_path / "upstream"
+    overlay_header_source = Path("overlay/cli/virace_cli_ext.h")
+    legacy_block = textwrap.dedent(
+        """\
+        /* VIRACE_EXT_CONVERT_INPUT_FILE_BEGIN */
+        static bool convert_input_file(cli_config_t* cfg, const char* infilename) {
+            bool res;
+
+            cfg->infilename = infilename;
+            if (cfg->outfilename_config)
+                cfg->outfilename = NULL;
+
+            if (cfg->subsong_index > 0 && cfg->subsong_end != 0) {
+                res = convert_subsongs(cfg);
+            }
+            else {
+                cfg->subsong_current_index = cfg->subsong_index;
+                res = convert_file(cfg);
+            }
+
+            if (res && cfg->delete_source) {
+                if (remove(cfg->infilename) == 0) {
+                    printf("source file deleted: %s\\n", cfg->infilename);
+                }
+                else {
+                    fprintf(stderr, "could not delete source file: %s\\n", cfg->infilename);
+                }
+            }
+
+            return res;
+        }
+        /* VIRACE_EXT_CONVERT_INPUT_FILE_END */
+
+        """
+    )
+
+    (workspace_root / "overlay/cli").mkdir(parents=True)
+    (workspace_root / "overlay/cli/virace_cli_ext.h").write_text(overlay_header_source.read_text(encoding="utf-8"), encoding="utf-8")
+
+    (repo_root / "cli").mkdir(parents=True)
+    (repo_root / "src").mkdir(parents=True)
+    (repo_root / "version.h").write_text("#define VGMSTREAM_VERSION 1\n", encoding="utf-8")
+    (repo_root / "cli/vgmstream_cli.c").write_text(CLI_C.replace("int main(int argc, char** argv) {\n", legacy_block + "int main(int argc, char** argv) {\n"), encoding="utf-8")
+    (repo_root / "src/CMakeLists.txt").write_text(SRC_CMAKELISTS, encoding="utf-8")
+    (repo_root / "cli/vgmstream_cli.h").write_text(CLI_H, encoding="utf-8")
+    (repo_root / "cli/vgmstream_cli_utils.c").write_text(CLI_UTILS_C, encoding="utf-8")
+    (repo_root / "cli/CMakeLists.txt").write_text(CLI_CMAKELISTS, encoding="utf-8")
+    create_git_repo(repo_root)
+
+    paths = InjectorPaths.resolve(workspace_root=workspace_root, repo_root=repo_root)
+    apply_overlay(paths)
+
+    cli_c = (repo_root / "cli/vgmstream_cli.c").read_text(encoding="utf-8")
+
+    assert cli_c.count("/* VIRACE_EXT_CONVERT_INPUT_FILE_BEGIN */") == 1
+    assert "virace_remove_path(cfg->infilename)" in cli_c
+    assert "if (remove(cfg->infilename) == 0)" not in cli_c
+
+
+def test_apply_overlay_collapses_duplicate_convert_input_file_blocks(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    repo_root = tmp_path / "upstream"
+    overlay_header_source = Path("overlay/cli/virace_cli_ext.h")
+    legacy_block = textwrap.dedent(
+        """\
+        /* VIRACE_EXT_CONVERT_INPUT_FILE_BEGIN */
+        static bool convert_input_file(cli_config_t* cfg, const char* infilename) {
+            bool res;
+
+            cfg->infilename = infilename;
+            if (cfg->outfilename_config)
+                cfg->outfilename = NULL;
+
+            if (cfg->subsong_index > 0 && cfg->subsong_end != 0) {
+                res = convert_subsongs(cfg);
+            }
+            else {
+                cfg->subsong_current_index = cfg->subsong_index;
+                res = convert_file(cfg);
+            }
+
+            if (res && cfg->delete_source) {
+                if (remove(cfg->infilename) == 0) {
+                    printf("source file deleted: %s\\n", cfg->infilename);
+                }
+                else {
+                    fprintf(stderr, "could not delete source file: %s\\n", cfg->infilename);
+                }
+            }
+
+            return res;
+        }
+        /* VIRACE_EXT_CONVERT_INPUT_FILE_END */
+
+        """
+    )
+
+    (workspace_root / "overlay/cli").mkdir(parents=True)
+    (workspace_root / "overlay/cli/virace_cli_ext.h").write_text(overlay_header_source.read_text(encoding="utf-8"), encoding="utf-8")
+
+    (repo_root / "cli").mkdir(parents=True)
+    (repo_root / "src").mkdir(parents=True)
+    (repo_root / "version.h").write_text("#define VGMSTREAM_VERSION 1\n", encoding="utf-8")
+    duplicated_cli_c = CLI_C.replace("int main(int argc, char** argv) {\n", legacy_block + legacy_block + "int main(int argc, char** argv) {\n")
+    (repo_root / "cli/vgmstream_cli.c").write_text(duplicated_cli_c, encoding="utf-8")
+    (repo_root / "src/CMakeLists.txt").write_text(SRC_CMAKELISTS, encoding="utf-8")
+    (repo_root / "cli/vgmstream_cli.h").write_text(CLI_H, encoding="utf-8")
+    (repo_root / "cli/vgmstream_cli_utils.c").write_text(CLI_UTILS_C, encoding="utf-8")
+    (repo_root / "cli/CMakeLists.txt").write_text(CLI_CMAKELISTS, encoding="utf-8")
+    create_git_repo(repo_root)
+
+    paths = InjectorPaths.resolve(workspace_root=workspace_root, repo_root=repo_root)
+    apply_overlay(paths)
+
+    cli_c = (repo_root / "cli/vgmstream_cli.c").read_text(encoding="utf-8")
+
+    assert cli_c.count("/* VIRACE_EXT_CONVERT_INPUT_FILE_BEGIN */") == 1
+    assert cli_c.count("static bool convert_input_file(cli_config_t* cfg, const char* infilename)") == 1

@@ -166,7 +166,7 @@ static bool virace_collect_directory_files(const char* dirpath, virace_file_list
                 return false;
             }
         }
-    } while (FindNextFileA(hFind, &ffd) != 0);
+    } while (FindNextFileW(hFind, &ffd) != 0);
 
     FindClose(hFind);
 #else

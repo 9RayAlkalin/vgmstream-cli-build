@@ -1,3 +1,7 @@
+--- a/cli/CMakeLists.txt
++++ b/cli/CMakeLists.txt
+@@ -29,0 +30 @@
++		target_link_options(vgmstream_cli PRIVATE /ENTRY:wmainCRTStartup)
 --- a/cli/vgmstream_cli.c
 +++ b/cli/vgmstream_cli.c
 @@ -23,0 +24 @@
@@ -20,7 +24,7 @@
 +                cfg->delete_source = true;
 +                break;
 +            /* VIRACE_EXT_OPTION_Y_END */
-@@ -643,0 +652,29 @@
+@@ -643,0 +652,39 @@
 +/* VIRACE_EXT_CONVERT_INPUT_FILE_BEGIN */
 +static bool convert_input_file(cli_config_t* cfg, const char* infilename) {
 +    bool res;
@@ -38,7 +42,7 @@
 +    }
 +
 +    if (res && cfg->delete_source) {
-+        if (remove(cfg->infilename) == 0) {
++        if (virace_remove_path(cfg->infilename) == 0) {
 +            printf("source file deleted: %s\n", cfg->infilename);
 +        }
 +        else {
@@ -50,9 +54,19 @@
 +}
 +/* VIRACE_EXT_CONVERT_INPUT_FILE_END */
 +
-@@ -646,0 +684 @@
++
++
++
++
++
++
++
++
++
++
+@@ -646,0 +694 @@
 +    int processed_file_count = 0;
-@@ -670,3 +708,13 @@
+@@ -670,3 +718,13 @@
 -    for (int i = 1; i < argc; i++) {
 -        // ignore flags
 -        if (i < CLI_MAX_FLAGS && cfg.flag_index[i]) {
@@ -69,7 +83,7 @@
 +            if (!virace_collect_directory_files(argv[i], &file_list) || file_list.count <= 0) {
 +            fprintf(stderr, "no .wem files found in directory: %s\n", argv[i]);
 +            virace_free_input_file_list(&file_list);
-@@ -676,8 +724,3 @@
+@@ -676,8 +734,3 @@
 -        // current name, to avoid passing params all the time
 -        cfg.infilename = argv[i];
 -        if (cfg.outfilename_config)
@@ -81,7 +95,7 @@
 +        for (int j = 0; j < file_list.count; j++) {
 +            processed_file_count++;
 +            res = convert_input_file(&cfg, file_list.items[j]);
-@@ -686,8 +729,13 @@
+@@ -686,8 +739,19 @@
 -        else {
 -            cfg.subsong_current_index = cfg.subsong_index;
 -
@@ -103,13 +117,31 @@
 +/* VIRACE_EXT_INPUT_LOOP_END */
 +
 +
-@@ -696 +744,9 @@
++
++
++
++
++
++
+@@ -696 +760,21 @@
 -    if (!ok)
 +    /* VIRACE_EXT_FINISH_SUMMARY_BEGIN */
 +    if (processed_file_count > 0) {
 +        printf("\nFinished processing %d file(s).\n", processed_file_count);
 +    }
 +/* VIRACE_EXT_FINISH_SUMMARY_END */
++
++
++
++
++
++
++
++
++
++
++
++
 +
 +
 +
@@ -125,8 +157,8 @@
 @@ -23,0 +25,2 @@
 +    char basename[CLI_PATH_LIMIT];
 +    char path[CLI_PATH_LIMIT];
-@@ -66,0 +70,17 @@
-+                /* VIRACE_EXT_WILDCARDS_BEGIN */
+@@ -66,0 +70,23 @@
++                                                                /* VIRACE_EXT_WILDCARDS_BEGIN */
 +        else if (pos[1] == 'b') {
 +            virace_extract_basename_without_extension(cfg->infilename, basename, sizeof(basename));
 +
@@ -143,9 +175,15 @@
 +        }
 +        /* VIRACE_EXT_WILDCARDS_END */
 +
++
++
++
++
++
++
 --- /dev/null
 +++ b/cli/virace_cli_ext.h
-@@ -0,0 +1,178 @@
+@@ -0,0 +1,238 @@
 +#ifndef _VIRACE_CLI_EXT_H_
 +#define _VIRACE_CLI_EXT_H_
 +
@@ -157,6 +195,7 @@
 +
 +#ifdef WIN32
 +#include <windows.h>
++#include <wchar.h>
 +#else
 +#include <dirent.h>
 +#include <sys/stat.h>
@@ -168,9 +207,47 @@
 +    int capacity;
 +} virace_file_list_t;
 +
++#ifdef _WIN32
++#define VIRACE_ARRAY_COUNT(array) (sizeof(array) / sizeof((array)[0]))
++
++static bool virace_utf8_to_wide(const char* input, wchar_t* output, size_t output_len) {
++    if (!input || !output || output_len == 0)
++        return false;
++
++    return MultiByteToWideChar(CP_UTF8, 0, input, -1, output, (int)output_len) > 0;
++}
++
++static bool virace_wide_to_utf8(const wchar_t* input, char* output, size_t output_len) {
++    if (!input || !output || output_len == 0)
++        return false;
++
++    return WideCharToMultiByte(CP_UTF8, 0, input, -1, output, (int)output_len, NULL, NULL) > 0;
++}
++#endif
++
++static int virace_remove_path(const char* path) {
++#ifdef _WIN32
++    wchar_t wpath[CLI_PATH_LIMIT];
++
++    if (!virace_utf8_to_wide(path, wpath, VIRACE_ARRAY_COUNT(wpath)))
++        return -1;
++
++    return _wremove(wpath);
++#else
++    return remove(path);
++#endif
++}
++
 +static bool virace_is_directory(const char* path) {
 +#ifdef _WIN32
-+    DWORD attrs = GetFileAttributesA(path);
++    wchar_t wpath[CLI_PATH_LIMIT];
++    DWORD attrs;
++
++    /* 上游 Windows CLI 已把 argv 转成 UTF-8，这里必须继续走 W API。 */
++    if (!virace_utf8_to_wide(path, wpath, VIRACE_ARRAY_COUNT(wpath)))
++        return false;
++
++    attrs = GetFileAttributesW(wpath);
 +    return attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY);
 +#else
 +    struct stat st;
@@ -228,33 +305,54 @@
 +static bool virace_collect_directory_files(const char* dirpath, virace_file_list_t* file_list) {
 +    char path[CLI_PATH_LIMIT];
 +#ifdef _WIN32
-+    WIN32_FIND_DATAA ffd;
++    char filename[CLI_PATH_LIMIT];
++    wchar_t wdirpath[CLI_PATH_LIMIT];
++    wchar_t wsearch[CLI_PATH_LIMIT];
++    wchar_t wpath[CLI_PATH_LIMIT];
++    WIN32_FIND_DATAW ffd;
 +    HANDLE hFind = INVALID_HANDLE_VALUE;
++    int written;
 +
-+    snprintf(path, sizeof(path), "%s\\*", dirpath);
-+    hFind = FindFirstFileA(path, &ffd);
++    if (!virace_utf8_to_wide(dirpath, wdirpath, VIRACE_ARRAY_COUNT(wdirpath)))
++        return false;
++
++    written = swprintf(wsearch, VIRACE_ARRAY_COUNT(wsearch), L"%ls\\*", wdirpath);
++    if (written < 0 || (size_t)written >= VIRACE_ARRAY_COUNT(wsearch))
++        return false;
++
++    hFind = FindFirstFileW(wsearch, &ffd);
 +    if (hFind == INVALID_HANDLE_VALUE)
 +        return false;
 +
 +    do {
 +        if (ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-+            if (strcmp(ffd.cFileName, ".") == 0 || strcmp(ffd.cFileName, "..") == 0)
++            if (wcscmp(ffd.cFileName, L".") == 0 || wcscmp(ffd.cFileName, L"..") == 0)
 +                continue;
 +
-+            snprintf(path, sizeof(path), "%s\\%s", dirpath, ffd.cFileName);
++            written = swprintf(wpath, VIRACE_ARRAY_COUNT(wpath), L"%ls\\%ls", wdirpath, ffd.cFileName);
++            if (written < 0 || (size_t)written >= VIRACE_ARRAY_COUNT(wpath) || !virace_wide_to_utf8(wpath, path, sizeof(path))) {
++                FindClose(hFind);
++                return false;
++            }
++
 +            if (!virace_collect_directory_files(path, file_list)) {
 +                FindClose(hFind);
 +                return false;
 +            }
 +        }
-+        else if (virace_has_wem_extension(ffd.cFileName)) {
-+            snprintf(path, sizeof(path), "%s\\%s", dirpath, ffd.cFileName);
++        else if (virace_wide_to_utf8(ffd.cFileName, filename, sizeof(filename)) && virace_has_wem_extension(filename)) {
++            written = swprintf(wpath, VIRACE_ARRAY_COUNT(wpath), L"%ls\\%ls", wdirpath, ffd.cFileName);
++            if (written < 0 || (size_t)written >= VIRACE_ARRAY_COUNT(wpath) || !virace_wide_to_utf8(wpath, path, sizeof(path))) {
++                FindClose(hFind);
++                return false;
++            }
++
 +            if (!virace_append_input_file(file_list, path)) {
 +                FindClose(hFind);
 +                return false;
 +            }
 +        }
-+    } while (FindNextFileA(hFind, &ffd) != 0);
++    } while (FindNextFileW(hFind, &ffd) != 0);
 +
 +    FindClose(hFind);
 +#else
@@ -324,3 +422,9 @@
 +}
 +
 +#endif
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -71,0 +72,3 @@
++if(WIN32)
++	target_compile_definitions(libvgmstream PRIVATE VGM_STDIO_UNICODE)
++endif()
