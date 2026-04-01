@@ -9,6 +9,7 @@
 
 #ifdef WIN32
 #include <windows.h>
+#include <wchar.h>
 #else
 #include <dirent.h>
 #include <sys/stat.h>
@@ -20,9 +21,43 @@ typedef struct {
     int capacity;
 } virace_file_list_t;
 
+#ifdef _WIN32
+#define VIRACE_ARRAY_COUNT(array) (sizeof(array) / sizeof((array)[0]))
+
+static bool virace_utf8_to_wide(const char* input, wchar_t* output, size_t output_len) {
+    if (!input || !output || output_len == 0)
+        return false;
+
+    return MultiByteToWideChar(CP_UTF8, 0, input, -1, output, (int)output_len) > 0;
+}
+
+static bool virace_wide_to_utf8(const wchar_t* input, char* output, size_t output_len) {
+    if (!input || !output || output_len == 0)
+        return false;
+
+    return WideCharToMultiByte(CP_UTF8, 0, input, -1, output, (int)output_len, NULL, NULL) > 0;
+}
+
+static int virace_remove_path(const char* path) {
+    wchar_t wpath[CLI_PATH_LIMIT];
+
+    if (!virace_utf8_to_wide(path, wpath, VIRACE_ARRAY_COUNT(wpath)))
+        return -1;
+
+    return _wremove(wpath);
+}
+#endif
+
 static bool virace_is_directory(const char* path) {
 #ifdef _WIN32
-    DWORD attrs = GetFileAttributesA(path);
+    wchar_t wpath[CLI_PATH_LIMIT];
+    DWORD attrs;
+
+    /* 上游 Windows CLI 已把 argv 转成 UTF-8，这里必须继续走 W API。 */
+    if (!virace_utf8_to_wide(path, wpath, VIRACE_ARRAY_COUNT(wpath)))
+        return false;
+
+    attrs = GetFileAttributesW(wpath);
     return attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY);
 #else
     struct stat st;
@@ -80,27 +115,48 @@ static void virace_free_input_file_list(virace_file_list_t* file_list) {
 static bool virace_collect_directory_files(const char* dirpath, virace_file_list_t* file_list) {
     char path[CLI_PATH_LIMIT];
 #ifdef _WIN32
-    WIN32_FIND_DATAA ffd;
+    char filename[CLI_PATH_LIMIT];
+    wchar_t wdirpath[CLI_PATH_LIMIT];
+    wchar_t wsearch[CLI_PATH_LIMIT];
+    wchar_t wpath[CLI_PATH_LIMIT];
+    WIN32_FIND_DATAW ffd;
     HANDLE hFind = INVALID_HANDLE_VALUE;
+    int written;
 
-    snprintf(path, sizeof(path), "%s\\*", dirpath);
-    hFind = FindFirstFileA(path, &ffd);
+    if (!virace_utf8_to_wide(dirpath, wdirpath, VIRACE_ARRAY_COUNT(wdirpath)))
+        return false;
+
+    written = swprintf(wsearch, VIRACE_ARRAY_COUNT(wsearch), L"%ls\\*", wdirpath);
+    if (written < 0 || (size_t)written >= VIRACE_ARRAY_COUNT(wsearch))
+        return false;
+
+    hFind = FindFirstFileW(wsearch, &ffd);
     if (hFind == INVALID_HANDLE_VALUE)
         return false;
 
     do {
         if (ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-            if (strcmp(ffd.cFileName, ".") == 0 || strcmp(ffd.cFileName, "..") == 0)
+            if (wcscmp(ffd.cFileName, L".") == 0 || wcscmp(ffd.cFileName, L"..") == 0)
                 continue;
 
-            snprintf(path, sizeof(path), "%s\\%s", dirpath, ffd.cFileName);
+            written = swprintf(wpath, VIRACE_ARRAY_COUNT(wpath), L"%ls\\%ls", wdirpath, ffd.cFileName);
+            if (written < 0 || (size_t)written >= VIRACE_ARRAY_COUNT(wpath) || !virace_wide_to_utf8(wpath, path, sizeof(path))) {
+                FindClose(hFind);
+                return false;
+            }
+
             if (!virace_collect_directory_files(path, file_list)) {
                 FindClose(hFind);
                 return false;
             }
         }
-        else if (virace_has_wem_extension(ffd.cFileName)) {
-            snprintf(path, sizeof(path), "%s\\%s", dirpath, ffd.cFileName);
+        else if (virace_wide_to_utf8(ffd.cFileName, filename, sizeof(filename)) && virace_has_wem_extension(filename)) {
+            written = swprintf(wpath, VIRACE_ARRAY_COUNT(wpath), L"%ls\\%ls", wdirpath, ffd.cFileName);
+            if (written < 0 || (size_t)written >= VIRACE_ARRAY_COUNT(wpath) || !virace_wide_to_utf8(wpath, path, sizeof(path))) {
+                FindClose(hFind);
+                return false;
+            }
+
             if (!virace_append_input_file(file_list, path)) {
                 FindClose(hFind);
                 return false;

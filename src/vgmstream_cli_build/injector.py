@@ -334,7 +334,7 @@ static bool convert_input_file(cli_config_t* cfg, const char* infilename) {
     }
 
     if (res && cfg->delete_source) {
-        if (remove(cfg->infilename) == 0) {
+        if (virace_remove_path(cfg->infilename) == 0) {
             printf("source file deleted: %s\\n", cfg->infilename);
         }
         else {

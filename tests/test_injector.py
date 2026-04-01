@@ -209,3 +209,33 @@ def test_apply_overlay_and_export_audit(tmp_path: Path) -> None:
     assert "virace_extract_basename_without_extension" in cli_utils
     assert overlay_copy.startswith("#ifndef _VIRACE_CLI_EXT_H_")
     assert "cli/virace_cli_ext.h" in audit_text
+
+
+def test_apply_overlay_uses_wide_windows_path_helpers(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    repo_root = tmp_path / "upstream"
+    overlay_header_source = Path("overlay/cli/virace_cli_ext.h")
+
+    (workspace_root / "overlay/cli").mkdir(parents=True)
+    (workspace_root / "overlay/cli/virace_cli_ext.h").write_text(overlay_header_source.read_text(encoding="utf-8"), encoding="utf-8")
+
+    (repo_root / "cli").mkdir(parents=True)
+    (repo_root / "src").mkdir(parents=True)
+    (repo_root / "version.h").write_text("#define VGMSTREAM_VERSION 1\n", encoding="utf-8")
+    (repo_root / "cli/vgmstream_cli.c").write_text(CLI_C, encoding="utf-8")
+    (repo_root / "cli/vgmstream_cli.h").write_text(CLI_H, encoding="utf-8")
+    (repo_root / "cli/vgmstream_cli_utils.c").write_text(CLI_UTILS_C, encoding="utf-8")
+    create_git_repo(repo_root)
+
+    paths = InjectorPaths.resolve(workspace_root=workspace_root, repo_root=repo_root)
+    apply_overlay(paths)
+
+    cli_c = (repo_root / "cli/vgmstream_cli.c").read_text(encoding="utf-8")
+    overlay_copy = (repo_root / "cli/virace_cli_ext.h").read_text(encoding="utf-8")
+
+    assert "GetFileAttributesW" in overlay_copy
+    assert "FindFirstFileW" in overlay_copy
+    assert "MultiByteToWideChar" in overlay_copy
+    assert "WideCharToMultiByte" in overlay_copy
+    assert "_wremove" in overlay_copy
+    assert "virace_remove_path(cfg->infilename)" in cli_c
