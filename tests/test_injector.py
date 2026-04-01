@@ -238,4 +238,5 @@ def test_apply_overlay_uses_wide_windows_path_helpers(tmp_path: Path) -> None:
     assert "MultiByteToWideChar" in overlay_copy
     assert "WideCharToMultiByte" in overlay_copy
     assert "_wremove" in overlay_copy
+    assert "return remove(path);" in overlay_copy
     assert "virace_remove_path(cfg->infilename)" in cli_c

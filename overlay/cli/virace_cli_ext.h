@@ -37,16 +37,20 @@ static bool virace_wide_to_utf8(const wchar_t* input, char* output, size_t outpu
 
     return WideCharToMultiByte(CP_UTF8, 0, input, -1, output, (int)output_len, NULL, NULL) > 0;
 }
+#endif
 
 static int virace_remove_path(const char* path) {
+#ifdef _WIN32
     wchar_t wpath[CLI_PATH_LIMIT];
 
     if (!virace_utf8_to_wide(path, wpath, VIRACE_ARRAY_COUNT(wpath)))
         return -1;
 
     return _wremove(wpath);
-}
+#else
+    return remove(path);
 #endif
+}
 
 static bool virace_is_directory(const char* path) {
 #ifdef _WIN32
