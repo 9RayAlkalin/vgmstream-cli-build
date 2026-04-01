@@ -15,12 +15,10 @@ from .c_tree import (
 
 
 TARGET_FILES = (
-    Path("cli/CMakeLists.txt"),
     Path("cli/vgmstream_cli.c"),
     Path("cli/vgmstream_cli.h"),
     Path("cli/vgmstream_cli_utils.c"),
     Path("cli/virace_cli_ext.h"),
-    Path("src/CMakeLists.txt"),
 )
 
 DEFAULT_AUDIT_PATCH = Path("audit/cli-overlay.audit.patch")
@@ -217,37 +215,6 @@ def copy_overlay_header(paths: InjectorPaths) -> None:
         raise InjectionError(f"Overlay header not found: {source}")
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
-
-
-def apply_vgmstream_cli_cmakelists(paths: InjectorPaths) -> None:
-    path = paths.repo_root / "cli/CMakeLists.txt"
-    newline = detect_newline(path.read_text(encoding="utf-8"))
-    block = normalize_newlines("\t\ttarget_link_options(vgmstream_cli PRIVATE /ENTRY:wmainCRTStartup)\n", newline)
-    updated = insert_after_line(
-        path.read_text(encoding="utf-8"),
-        "if(MSVC)",
-        block,
-        "Windows CMake unicode entrypoint",
-    )
-    write_text(path, updated)
-
-
-def apply_libvgmstream_cmakelists(paths: InjectorPaths) -> None:
-    path = paths.repo_root / "src/CMakeLists.txt"
-    newline = detect_newline(path.read_text(encoding="utf-8"))
-    block = normalize_newlines(
-        "if(WIN32)\n"
-        "\ttarget_compile_definitions(libvgmstream PRIVATE VGM_STDIO_UNICODE)\n"
-        "endif()\n",
-        newline,
-    )
-    updated = insert_after_line(
-        path.read_text(encoding="utf-8"),
-        "setup_target(libvgmstream)",
-        block,
-        "libvgmstream Windows unicode stdio",
-    )
-    write_text(path, updated)
 
 
 def apply_vgmstream_cli_h(paths: InjectorPaths) -> None:
@@ -464,8 +431,6 @@ for (int i = 1; i < argc; i++) {
 
 def apply_overlay(paths: InjectorPaths) -> None:
     copy_overlay_header(paths)
-    apply_vgmstream_cli_cmakelists(paths)
-    apply_libvgmstream_cmakelists(paths)
     apply_vgmstream_cli_c(paths)
     apply_vgmstream_cli_h(paths)
     apply_vgmstream_cli_utils(paths)
