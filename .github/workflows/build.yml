@@ -250,6 +250,7 @@ jobs:
                 -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13 \
                 -DCMAKE_OSX_ARCHITECTURES=arm64 \
                 -DCMAKE_PREFIX_PATH="$BREW_PREFIX"
+                -DCMAKE_EXE_LINKER_FLAGS="-L$BREW_PREFIX/lib"
           cmake --build ./build-arm64
     
       # ---- x86_64 构建 ----
@@ -266,6 +267,7 @@ jobs:
                 -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13 \
                 -DCMAKE_OSX_ARCHITECTURES=x86_64 \
                 -DCMAKE_PREFIX_PATH=/usr/local
+                -DCMAKE_EXE_LINKER_FLAGS="-L$BREW_PREFIX/lib"
           cmake --build ./build-x86_64
     
       # ---- 合并 Universal ----
