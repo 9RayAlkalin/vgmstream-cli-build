@@ -230,7 +230,7 @@ def apply_vgmstream_cli_utils(paths: InjectorPaths) -> None:
     insert_after_include(path, '#include "vgmstream_cli.h"', normalize_newlines('#include "virace_cli_ext.h"\n', newline))
     replace_function_region_once(
         path,
-        "replace_filename",
+        "cli_replace_filename",
         normalize_newlines("    char stream_name[CLI_PATH_LIMIT];\n", newline),
         normalize_newlines("    char stream_name[CLI_PATH_LIMIT];\n    char basename[CLI_PATH_LIMIT];\n    char path[CLI_PATH_LIMIT];\n", newline),
         "replace_filename scratch variables",
@@ -265,7 +265,7 @@ def apply_vgmstream_cli_utils(paths: InjectorPaths) -> None:
             insert_before=True,
         )
 
-    update_function_region(path, "replace_filename", _inject_wildcards)
+    update_function_region(path, "cli_replace_filename", _inject_wildcards)
 
 
 def apply_vgmstream_cli_c(paths: InjectorPaths) -> None:
