@@ -254,7 +254,7 @@ jobs:
           path: build/cli/vgmstream-cli
 
   build-macos-x86_64:
-    runs-on: macos-13
+    runs-on: macos-15-intel
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
