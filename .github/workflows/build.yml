@@ -244,37 +244,14 @@ jobs:
         run: |
           eval "$(brew shellenv)"
           BREW_PREFIX=$(brew --prefix)
-    
-          # 直接告诉 CMake 每个库的完整路径
           cmake -S ./vgmstream -B ./build-arm64 \
                 -DBUILD_AUDACIOUS:BOOL=OFF \
                 -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
                 -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13 \
                 -DCMAKE_OSX_ARCHITECTURES=arm64 \
-                -DMPG123_LIBRARY="$BREW_PREFIX/lib/libmpg123.dylib" \
-                -DVORBIS_LIBRARY="$BREW_PREFIX/lib/libvorbis.dylib" \
-                -DVORBISFILE_LIBRARY="$BREW_PREFIX/lib/libvorbisfile.dylib" \
-                -DOGG_LIBRARY="$BREW_PREFIX/lib/libogg.dylib" \
-                -DFFMPEG_avformat_LIBRARY="$BREW_PREFIX/lib/libavformat.dylib" \
-                -DFFMPEG_avcodec_LIBRARY="$BREW_PREFIX/lib/libavcodec.dylib" \
-                -DFFMPEG_avutil_LIBRARY="$BREW_PREFIX/lib/libavutil.dylib" \
-                -DFFMPEG_swresample_LIBRARY="$BREW_PREFIX/lib/libswresample.dylib" \
-                -DCMAKE_EXE_LINKER_FLAGS="-L$BREW_PREFIX/lib"
-    
-          # 如果 CMake 还是用了 -lxxx，强制替换 link.txt
-          find ./build-arm64 -name link.txt -exec sed -i '' \
-            -e "s|-lmpg123|$BREW_PREFIX/lib/libmpg123.dylib|g" \
-            -e "s|-lvorbisfile|$BREW_PREFIX/lib/libvorbisfile.dylib|g" \
-            -e "s|-lvorbis|$BREW_PREFIX/lib/libvorbis.dylib|g" \
-            -e "s|-logg|$BREW_PREFIX/lib/libogg.dylib|g" \
-            -e "s|-lswresample|$BREW_PREFIX/lib/libswresample.dylib|g" \
-            -e "s|-lavcodec|$BREW_PREFIX/lib/libavcodec.dylib|g" \
-            -e "s|-lavformat|$BREW_PREFIX/lib/libavformat.dylib|g" \
-            -e "s|-lavutil|$BREW_PREFIX/lib/libavutil.dylib|g" \
-            {} \;
-          
+                -DCMAKE_PREFIX_PATH="$BREW_PREFIX"
           cmake --build ./build-arm64
-
+    
       # ---- x86_64 构建 ----
       - name: Install dependencies (x86_64)
         run: |
@@ -283,41 +260,14 @@ jobs:
   
       - name: Build x86_64
         run: |
-          export LDFLAGS="-L/usr/local/lib"
-          export CPPFLAGS="-I/usr/local/include"
-          export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig"
-          export LIBRARY_PATH="/usr/local/lib"
-    
-          # 直接告诉 CMake 每个库的完整路径
           cmake -S ./vgmstream -B ./build-x86_64 \
                 -DBUILD_AUDACIOUS:BOOL=OFF \
                 -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
                 -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13 \
-                -DCMAKE_OSX_ARCHITECTURES=arm64 \
-                -DMPG123_LIBRARY="$BREW_PREFIX/lib/libmpg123.dylib" \
-                -DVORBIS_LIBRARY="$BREW_PREFIX/lib/libvorbis.dylib" \
-                -DVORBISFILE_LIBRARY="$BREW_PREFIX/lib/libvorbisfile.dylib" \
-                -DOGG_LIBRARY="$BREW_PREFIX/lib/libogg.dylib" \
-                -DFFMPEG_avformat_LIBRARY="$BREW_PREFIX/lib/libavformat.dylib" \
-                -DFFMPEG_avcodec_LIBRARY="$BREW_PREFIX/lib/libavcodec.dylib" \
-                -DFFMPEG_avutil_LIBRARY="$BREW_PREFIX/lib/libavutil.dylib" \
-                -DFFMPEG_swresample_LIBRARY="$BREW_PREFIX/lib/libswresample.dylib" \
-                -DCMAKE_EXE_LINKER_FLAGS="-L$BREW_PREFIX/lib"
-    
-          # 如果 CMake 还是用了 -lxxx，强制替换 link.txt
-          find ./build-x86_64 -name link.txt -exec sed -i '' \
-            -e "s|-lmpg123|$BREW_PREFIX/lib/libmpg123.dylib|g" \
-            -e "s|-lvorbisfile|$BREW_PREFIX/lib/libvorbisfile.dylib|g" \
-            -e "s|-lvorbis|$BREW_PREFIX/lib/libvorbis.dylib|g" \
-            -e "s|-logg|$BREW_PREFIX/lib/libogg.dylib|g" \
-            -e "s|-lswresample|$BREW_PREFIX/lib/libswresample.dylib|g" \
-            -e "s|-lavcodec|$BREW_PREFIX/lib/libavcodec.dylib|g" \
-            -e "s|-lavformat|$BREW_PREFIX/lib/libavformat.dylib|g" \
-            -e "s|-lavutil|$BREW_PREFIX/lib/libavutil.dylib|g" \
-            {} \;
-          
+                -DCMAKE_OSX_ARCHITECTURES=x86_64 \
+                -DCMAKE_PREFIX_PATH=/usr/local
           cmake --build ./build-x86_64
-
+    
       # ---- 合并 Universal ----
       - name: Create Universal binary
         run: |
