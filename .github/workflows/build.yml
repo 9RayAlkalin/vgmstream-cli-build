@@ -244,8 +244,7 @@ jobs:
                 -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13 \
                 -DCMAKE_OSX_ARCHITECTURES=arm64 \
                 -DCMAKE_PREFIX_PATH="$BREW_PREFIX" \
-                -DCMAKE_EXE_LINKER_FLAGS="-L$BREW_PREFIX/lib" \
-                -DBUILD_STATIC=ON
+                -DCMAKE_EXE_LINKER_FLAGS="-L$BREW_PREFIX/lib"
           cmake --build ./build
 
       - name: Upload artifact (ARM64)
@@ -301,8 +300,7 @@ jobs:
                 -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
                 -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13 \
                 -DCMAKE_PREFIX_PATH=/usr/local \
-                -DCMAKE_EXE_LINKER_FLAGS="-L/usr/local/lib" \
-                -DBUILD_STATIC=ON
+                -DCMAKE_EXE_LINKER_FLAGS="-L/usr/local/lib"
           cmake --build ./build
 
       - name: Upload artifact (x86_64)
@@ -312,7 +310,7 @@ jobs:
           path: build/cli/vgmstream-cli
 
   merge-macos:
-    runs-on: macos-latest 
+    runs-on: macos-latest
     needs: [build-macos-arm64, build-macos-x86_64]
     steps:
       - name: Download ARM64 artifact
@@ -333,11 +331,29 @@ jobs:
           lipo -create arm64/vgmstream-cli x86_64/vgmstream-cli -output universal/vgmstream-cli
           file universal/vgmstream-cli
 
-      - name: Upload Universal artifact
+      - name: Install dylibbundler
+        run: brew install dylibbundler
+
+      - name: Bundle dependencies
+        run: |
+          cd universal
+          # 将依赖库复制到 libs 子目录，并修改二进制内的路径
+          dylibbundler -od -b -x ./vgmstream-cli -d ./libs -p @executable_path/libs/
+          # 验证
+          otool -L ./vgmstream-cli
+
+      - name: Create bundle zip
+        run: |
+          cd universal
+          zip -r ../vgmstream-cli-macos-universal-bundle.zip ./*
+          cd ..
+          ls -l
+
+      - name: Upload bundle artifact
         uses: actions/upload-artifact@v4
         with:
-          name: vgmstream-cli-macos-universal
-          path: universal/vgmstream-cli
+          name: vgmstream-cli-macos-universal-bundle
+          path: vgmstream-cli-macos-universal-bundle.zip
 
   # ============================================================
   # Release (合并所有平台)
