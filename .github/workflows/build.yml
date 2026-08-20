@@ -196,159 +196,103 @@ jobs:
           path: vgmstream/build/cli/vgmstream-cli
 
   # ========== 新增 macOS Universal 构建 ==========
-  build-macos-arm64:
-    runs-on: macos-latest          # Apple Silicon runner
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-    steps:
-      - name: Checkout local repository
-        uses: actions/checkout@v4
+build-macos-universal:
+  runs-on: macos-latest
+  outputs:
+    version: ${{ steps.version.outputs.version }}
+  steps:
+    - name: Checkout local repository
+      uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v6
+    - name: Set up uv
+      uses: astral-sh/setup-uv@v6
 
-      - name: Install injector dependencies
-        run: uv sync --locked
+    - name: Install injector dependencies
+      run: uv sync --locked
 
-      - name: Clone vgmstream
-        run: git clone https://github.com/vgmstream/vgmstream.git
+    - name: Clone vgmstream
+      run: git clone https://github.com/vgmstream/vgmstream.git
 
-      - name: Fetch Git tags
-        working-directory: ./vgmstream
-        run: git fetch --prune --tags
+    - name: Fetch Git tags
+      working-directory: ./vgmstream
+      run: git fetch --prune --tags
 
-      - name: Apply CLI overlay and export audit patch
-        shell: bash
-        run: uv run vgmstream-cli-build sync --repo-root ./vgmstream --workspace-root .
+    - name: Apply CLI overlay and export audit patch
+      shell: bash
+      run: uv run vgmstream-cli-build sync --repo-root ./vgmstream --workspace-root .
 
-      - name: Get version
-        id: version
-        working-directory: ./vgmstream
-        run: |
-          version=$(git describe --tags --always)
-          echo "version=$version" >> $GITHUB_OUTPUT
+    - name: Get version
+      id: version
+      working-directory: ./vgmstream
+      run: |
+        version=$(git describe --tags --always)
+        echo "version=$version" >> $GITHUB_OUTPUT
 
-      - name: Install dependencies (Homebrew)
-        run: brew install autoconf automake ffmpeg libao libvorbis mpg123 libtool
+    # ---- 安装 ARM64 依赖 ----
+    - name: Install dependencies (ARM64)
+      run: |
+        eval "$(brew shellenv)"          # 默认指向 /opt/homebrew (ARM64)
+        brew install autoconf automake ffmpeg libao libvorbis mpg123 libtool
 
-      - name: Cache dependencies (optional, keyed by arch)
-        uses: actions/cache@v4
-        with:
-          path: |
-            vgmstream/dependencies/celt-0061
-            vgmstream/dependencies/celt-0110
-            vgmstream/build/dependencies/celt-0061/libcelt/.libs
-            vgmstream/build/dependencies/celt-0110/libcelt/.libs
-            vgmstream/build/dependencies/LibAtrac9/bin
-            vgmstream/build/dependencies/libg719_decode/libg719_decode.a
-          key: macos-arm64-${{ hashFiles('vgmstream/cmake/dependencies/*.cmake') }}
+    # ---- 构建 ARM64 ----
+    - name: Build ARM64
+      run: |
+        eval "$(brew shellenv)"
+        cmake -S ./vgmstream -B ./build-arm64 \
+              -DBUILD_AUDACIOUS:BOOL=OFF \
+              -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
+              -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13 \
+              -DCMAKE_OSX_ARCHITECTURES=arm64
+        cmake --build ./build-arm64
 
-      - name: Build
-        run: |
-          eval "$(brew shellenv)"
-          BREW_PREFIX=$(brew --prefix)
-          cmake -S ./vgmstream -B ./vgmstream/build \
-                -DBUILD_AUDACIOUS:BOOL=OFF \
-                -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
-                -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13 \
-                -DCMAKE_PREFIX_PATH="$BREW_PREFIX" \
-                -DCMAKE_LIBRARY_PATH="$BREW_PREFIX/lib" \
-                -DMPG123_LIBRARY="$BREW_PREFIX/lib/libmpg123.dylib" \
-                -DMPG123_INCLUDE_DIR="$BREW_PREFIX/include" \
-                -DCMAKE_EXE_LINKER_FLAGS="-L$BREW_PREFIX/lib" \
-                -DMPG123_USE_PKG_CONFIG=OFF
-          cmake --build ./vgmstream/build
+    # ---- 安装 x86_64 依赖 ----
+    - name: Install dependencies (x86_64)
+      run: |
+        # 使用 x86_64 的 Homebrew（位于 /usr/local）
+        arch -x86_64 /usr/local/bin/brew install autoconf automake ffmpeg libao libvorbis mpg123 libtool
 
-      - name: Upload artifact (arm64)
-        uses: actions/upload-artifact@v4
-        with:
-          name: vgmstream-cli-macos-arm64
-          path: vgmstream/build/cli/vgmstream-cli
+    # ---- 构建 x86_64 ----
+    - name: Build x86_64
+      run: |
+        # 设置环境变量指向 x86_64 的库路径
+        export CMAKE_PREFIX_PATH=/usr/local
+        export CMAKE_LIBRARY_PATH=/usr/local/lib
+        cmake -S ./vgmstream -B ./build-x86_64 \
+              -DBUILD_AUDACIOUS:BOOL=OFF \
+              -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
+              -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13 \
+              -DCMAKE_OSX_ARCHITECTURES=x86_64 \
+              -DCMAKE_PREFIX_PATH=/usr/local \
+              -DCMAKE_LIBRARY_PATH=/usr/local/lib \
+              -DMPG123_LIBRARY=/usr/local/lib/libmpg123.dylib \
+              -DMPG123_INCLUDE_DIR=/usr/local/include \
+              -DCMAKE_EXE_LINKER_FLAGS="-L/usr/local/lib"
+        cmake --build ./build-x86_64
 
-  # ========== macOS x86_64 构建 ==========
-  build-macos-x86_64:
-    runs-on: macos-13              # Intel runner
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-    steps:
-      - name: Checkout local repository
-        uses: actions/checkout@v4
+    # ---- 合并为 Universal ----
+    - name: Create Universal binary
+      run: |
+        mkdir -p universal
+        lipo -create ./build-arm64/cli/vgmstream-cli ./build-x86_64/cli/vgmstream-cli \
+             -output ./universal/vgmstream-cli
+        file ./universal/vgmstream-cli   # 验证
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v6
-
-      - name: Install injector dependencies
-        run: uv sync --locked
-
-      - name: Clone vgmstream
-        run: git clone https://github.com/vgmstream/vgmstream.git
-
-      - name: Fetch Git tags
-        working-directory: ./vgmstream
-        run: git fetch --prune --tags
-
-      - name: Apply CLI overlay and export audit patch
-        shell: bash
-        run: uv run vgmstream-cli-build sync --repo-root ./vgmstream --workspace-root .
-
-      - name: Get version
-        id: version
-        working-directory: ./vgmstream
-        run: |
-          version=$(git describe --tags --always)
-          echo "version=$version" >> $GITHUB_OUTPUT
-
-      - name: Install dependencies (Homebrew)
-        run: brew install autoconf automake ffmpeg libao libvorbis mpg123 libtool
-
-      - name: Cache dependencies (keyed by arch)
-        uses: actions/cache@v4
-        with:
-          path: |
-            vgmstream/dependencies/celt-0061
-            vgmstream/dependencies/celt-0110
-            vgmstream/build/dependencies/celt-0061/libcelt/.libs
-            vgmstream/build/dependencies/celt-0110/libcelt/.libs
-            vgmstream/build/dependencies/LibAtrac9/bin
-            vgmstream/build/dependencies/libg719_decode/libg719_decode.a
-          key: macos-x86_64-${{ hashFiles('vgmstream/cmake/dependencies/*.cmake') }}
-
-      - name: Build
-        run: |
-          eval "$(brew shellenv)"
-          BREW_PREFIX=$(brew --prefix)
-          cmake -S ./vgmstream -B ./vgmstream/build \
-                -DBUILD_AUDACIOUS:BOOL=OFF \
-                -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
-                -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13 \
-                -DCMAKE_PREFIX_PATH="$BREW_PREFIX" \
-                -DCMAKE_LIBRARY_PATH="$BREW_PREFIX/lib" \
-                -DMPG123_LIBRARY="$BREW_PREFIX/lib/libmpg123.dylib" \
-                -DMPG123_INCLUDE_DIR="$BREW_PREFIX/include" \
-                -DCMAKE_EXE_LINKER_FLAGS="-L$BREW_PREFIX/lib" \
-                -DMPG123_USE_PKG_CONFIG=OFF
-          cmake --build ./vgmstream/build
-
-      - name: Upload artifact (x86_64)
-        uses: actions/upload-artifact@v4
-        with:
-          name: vgmstream-cli-macos-x86_64
-          path: vgmstream/build/cli/vgmstream-cli
+    # ---- 上传 Universal artifact ----
+    - name: Upload artifact (macOS universal)
+      uses: actions/upload-artifact@v4
+      with:
+        name: vgmstream-cli-macos-universal
+        path: universal/vgmstream-cli
 
   # ========== Release 阶段 ==========
   release:
     runs-on: ubuntu-latest
-    needs: [build-windows, build-linux, build-macos-arm64, build-macos-x86_64]   # 新增 macOS 依赖
+    needs: [build-windows, build-linux, build-macos-universal]   # 新增 macOS 依赖
     if: github.ref == 'refs/heads/main'
     permissions:
       contents: write
@@ -362,14 +306,7 @@ jobs:
         run: |
           (cd artifacts/vgmstream-cli-windows && zip -r ../../vgmstream-win64.zip .)
           (cd artifacts/vgmstream-cli-linux   && zip -r ../../vgmstream-linux-cli.zip .)
-          
-          # macOS：合并 arm64 和 x86_64 为 universal
-          mkdir -p macos_universal
-          lipo -create \
-            artifacts/vgmstream-cli-macos-arm64/vgmstream-cli \
-            artifacts/vgmstream-cli-macos-x86_64/vgmstream-cli \
-            -output macos_universal/vgmstream-cli
-          (cd macos_universal && zip -r ../vgmstream-macos-universal.zip .)
+          (cp artifacts/vgmstream-cli-macos-universal/vgmstream-cli . && zip vgmstream-macos-universal.zip vgmstream-cli)
           
           ls -l
 
