@@ -248,13 +248,20 @@ jobs:
             vgmstream/build/dependencies/libg719_decode/libg719_decode.a
           key: macos-arm64-${{ hashFiles('vgmstream/cmake/dependencies/*.cmake') }}
 
-      - name: Build (arm64)
+      - name: Build
         run: |
           eval "$(brew shellenv)"
+          BREW_PREFIX=$(brew --prefix)
           cmake -S ./vgmstream -B ./vgmstream/build \
                 -DBUILD_AUDACIOUS:BOOL=OFF \
                 -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
-                -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13
+                -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13 \
+                -DCMAKE_PREFIX_PATH="$BREW_PREFIX" \
+                -DCMAKE_LIBRARY_PATH="$BREW_PREFIX/lib" \
+                -DMPG123_LIBRARY="$BREW_PREFIX/lib/libmpg123.dylib" \
+                -DMPG123_INCLUDE_DIR="$BREW_PREFIX/include" \
+                -DCMAKE_EXE_LINKER_FLAGS="-L$BREW_PREFIX/lib" \
+                -DMPG123_USE_PKG_CONFIG=OFF
           cmake --build ./vgmstream/build
 
       - name: Upload artifact (arm64)
@@ -316,14 +323,20 @@ jobs:
             vgmstream/build/dependencies/libg719_decode/libg719_decode.a
           key: macos-x86_64-${{ hashFiles('vgmstream/cmake/dependencies/*.cmake') }}
 
-      - name: Build (x86_64)
+      - name: Build
         run: |
           eval "$(brew shellenv)"
+          BREW_PREFIX=$(brew --prefix)
           cmake -S ./vgmstream -B ./vgmstream/build \
                 -DBUILD_AUDACIOUS:BOOL=OFF \
                 -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
-                -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13
-          # 注意：macos-13 是 Intel，默认构建 x86_64，无需指定架构
+                -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13 \
+                -DCMAKE_PREFIX_PATH="$BREW_PREFIX" \
+                -DCMAKE_LIBRARY_PATH="$BREW_PREFIX/lib" \
+                -DMPG123_LIBRARY="$BREW_PREFIX/lib/libmpg123.dylib" \
+                -DMPG123_INCLUDE_DIR="$BREW_PREFIX/include" \
+                -DCMAKE_EXE_LINKER_FLAGS="-L$BREW_PREFIX/lib" \
+                -DMPG123_USE_PKG_CONFIG=OFF
           cmake --build ./vgmstream/build
 
       - name: Upload artifact (x86_64)
