@@ -4,6 +4,9 @@ on:
   workflow_dispatch:
 
 jobs:
+  # ============================================================
+  # Windows (保持不变)
+  # ============================================================
   build-windows:
     runs-on: windows-2022
     outputs:
@@ -69,6 +72,9 @@ jobs:
           name: vgmstream-cli-windows
           path: vgmstream/bin/artifacts/cli-x64
 
+  # ============================================================
+  # Linux (保持不变)
+  # ============================================================
   build-linux:
     runs-on: ubuntu-latest
     outputs:
@@ -195,8 +201,10 @@ jobs:
           name: vgmstream-cli-linux
           path: vgmstream/build/cli/vgmstream-cli
 
-  # ========== 新增 macOS Universal 构建 ==========
-  build-macos-universal:
+  # ============================================================
+  # macOS ARM64 (Apple Silicon) 原生构建
+  # ============================================================
+  build-macos-arm64:
     runs-on: macos-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -233,61 +241,88 @@ jobs:
           version=$(git describe --tags --always)
           echo "version=$version" >> $GITHUB_OUTPUT
 
-      # ---- ARM64 构建 ----
-      - name: Install dependencies (ARM64)
-        run: |
-          eval "$(brew shellenv)"
-          brew install autoconf automake ffmpeg libao libvorbis mpg123 libtool
-          ls -l $(brew --prefix)/lib/libmpg123*
+      - name: Install dependencies
+        run: brew install autoconf automake ffmpeg libao libvorbis mpg123 libtool
 
       - name: Build ARM64
         run: |
-          eval "$(brew shellenv)"
-          BREW_PREFIX=$(brew --prefix)
-          cmake -S ./vgmstream -B ./build-arm64 \
+          cmake -S ./vgmstream -B ./build \
                 -DBUILD_AUDACIOUS:BOOL=OFF \
                 -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
                 -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13 \
-                -DCMAKE_OSX_ARCHITECTURES=arm64 \
-                -DCMAKE_PREFIX_PATH="$BREW_PREFIX" \
-                -DCMAKE_EXE_LINKER_FLAGS="-L$BREW_PREFIX/lib"
-          cmake --build ./build-arm64
-    
-      # ---- x86_64 构建 ----
-      - name: Install dependencies (x86_64)
-        run: |
-          arch -x86_64 /usr/local/bin/brew install autoconf automake ffmpeg libao libvorbis mpg123 libtool
-          ls -l /usr/local/lib/libmpg123*
-  
-      - name: Build x86_64
-        run: |
-          cmake -S ./vgmstream -B ./build-x86_64 \
-                -DBUILD_AUDACIOUS:BOOL=OFF \
-                -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
-                -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13 \
-                -DCMAKE_OSX_ARCHITECTURES=x86_64 \
-                -DCMAKE_PREFIX_PATH=/usr/local \
-                -DCMAKE_EXE_LINKER_FLAGS="-L$BREW_PREFIX/lib"
-          cmake --build ./build-x86_64
-    
-      # ---- 合并 Universal ----
-      - name: Create Universal binary
-        run: |
-          mkdir -p universal
-          lipo -create ./build-arm64/cli/vgmstream-cli ./build-x86_64/cli/vgmstream-cli \
-               -output ./universal/vgmstream-cli
-          file ./universal/vgmstream-cli
+                -DCMAKE_OSX_ARCHITECTURES=arm64
+          cmake --build ./build
 
-      - name: Upload artifact (macOS universal)
+      - name: Upload artifact (ARM64)
         uses: actions/upload-artifact@v4
         with:
-          name: vgmstream-cli-macos-universal
-          path: universal/vgmstream-cli
+          name: vgmstream-cli-macos-arm64
+          path: build/cli/vgmstream-cli
 
-  # ========== Release 阶段 ==========
+  # ============================================================
+  # macOS x86_64 (Intel) 原生构建
+  # ============================================================
+  build-macos-x86_64:
+    runs-on: macos-13
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout local repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Install injector dependencies
+        run: uv sync --locked
+
+      - name: Clone vgmstream
+        run: git clone https://github.com/vgmstream/vgmstream.git
+
+      - name: Fetch Git tags
+        working-directory: ./vgmstream
+        run: git fetch --prune --tags
+
+      - name: Apply CLI overlay and export audit patch
+        shell: bash
+        run: uv run vgmstream-cli-build sync --repo-root ./vgmstream --workspace-root .
+
+      - name: Get version
+        id: version
+        working-directory: ./vgmstream
+        run: |
+          version=$(git describe --tags --always)
+          echo "version=$version" >> $GITHUB_OUTPUT
+
+      - name: Install dependencies
+        run: brew install autoconf automake ffmpeg libao libvorbis mpg123 libtool
+
+      - name: Build x86_64
+        run: |
+          cmake -S ./vgmstream -B ./build \
+                -DBUILD_AUDACIOUS:BOOL=OFF \
+                -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
+                -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13
+          # macos-13 默认构建 x86_64，无需指定架构
+          cmake --build ./build
+
+      - name: Upload artifact (x86_64)
+        uses: actions/upload-artifact@v4
+        with:
+          name: vgmstream-cli-macos-x86_64
+          path: build/cli/vgmstream-cli
+
+  # ============================================================
+  # Release (合并所有平台)
+  # ============================================================
   release:
     runs-on: ubuntu-latest
-    needs: [build-windows, build-linux, build-macos-universal]   # 新增 macOS 依赖
+    needs: [build-windows, build-linux, build-macos-arm64, build-macos-x86_64]
     if: github.ref == 'refs/heads/main'
     permissions:
       contents: write
@@ -299,10 +334,17 @@ jobs:
 
       - name: Prepare release assets
         run: |
+          # Windows
           (cd artifacts/vgmstream-cli-windows && zip -r ../../vgmstream-win64.zip .)
+          # Linux
           (cd artifacts/vgmstream-cli-linux   && zip -r ../../vgmstream-linux-cli.zip .)
-          (cp artifacts/vgmstream-cli-macos-universal/vgmstream-cli . && zip vgmstream-macos-universal.zip vgmstream-cli)
-          
+          # macOS universal: 合并两个架构
+          mkdir -p macos_universal
+          lipo -create \
+            artifacts/vgmstream-cli-macos-arm64/vgmstream-cli \
+            artifacts/vgmstream-cli-macos-x86_64/vgmstream-cli \
+            -output macos_universal/vgmstream-cli
+          (cd macos_universal && zip -r ../vgmstream-macos-universal.zip .)
           ls -l
 
       - name: Release
