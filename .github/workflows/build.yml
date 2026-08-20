@@ -238,6 +238,7 @@ jobs:
         run: |
           eval "$(brew shellenv)"
           brew install autoconf automake ffmpeg libao libvorbis mpg123 libtool
+          ls -l $(brew --prefix)/lib/libmpg123*
 
       - name: Build ARM64
         run: |
@@ -247,6 +248,7 @@ jobs:
                 -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
                 -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13 \
                 -DCMAKE_OSX_ARCHITECTURES=arm64
+          find ./build-arm64 -name link.txt -exec sed -i '' 's|-lmpg123|/opt/homebrew/lib/libmpg123.dylib|g' {} \;
           cmake --build ./build-arm64
 
       # ---- x86_64 构建 ----
@@ -272,9 +274,7 @@ jobs:
                 -DMPG123_LIBRARY=/usr/local/lib/libmpg123.dylib \
                 -DMPG123_INCLUDE_DIR=/usr/local/include
 
-          # 强行修改链接命令
           find ./build-x86_64 -name link.txt -exec sed -i '' 's|-lmpg123|/usr/local/lib/libmpg123.dylib|g' {} \;
-
           cmake --build ./build-x86_64
 
       # ---- 合并 Universal ----
