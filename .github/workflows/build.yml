@@ -4,9 +4,6 @@ on:
   workflow_dispatch:
 
 jobs:
-  # ============================================================
-  # Windows (保持不变)
-  # ============================================================
   build-windows:
     runs-on: windows-2022
     outputs:
@@ -72,9 +69,6 @@ jobs:
           name: vgmstream-cli-windows
           path: vgmstream/bin/artifacts/cli-x64
 
-  # ============================================================
-  # Linux (保持不变)
-  # ============================================================
   build-linux:
     runs-on: ubuntu-latest
     outputs:
@@ -200,10 +194,7 @@ jobs:
         with:
           name: vgmstream-cli-linux
           path: vgmstream/build/cli/vgmstream-cli
-
-  # ============================================================
-  # macOS ARM64 (Apple Silicon) 原生构建
-  # ============================================================
+          
   build-macos-arm64:
     runs-on: macos-latest
     outputs:
@@ -259,11 +250,8 @@ jobs:
           name: vgmstream-cli-macos-arm64
           path: build/cli/vgmstream-cli
 
-  # ============================================================
-  # macOS x86_64 (Intel) 原生构建
-  # ============================================================
   build-macos-x86_64:
-    runs-on: macos-13
+    runs-on: macos-14
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
