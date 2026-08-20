@@ -274,8 +274,14 @@ jobs:
             -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13
 
       - name: Build
-        working-directory: vgmstream/build
-        run: cmake --build . --config Release
+        run: |
+          eval "$(brew shellenv)"
+          cmake -S . -B build \
+                -DBUILD_AUDACIOUS:BOOL=OFF \
+                -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
+                -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
+                -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13
+          cmake --build build
 
       - name: Upload artifact (macOS)
         uses: actions/upload-artifact@v4
