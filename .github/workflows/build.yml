@@ -237,11 +237,14 @@ jobs:
 
       - name: Build ARM64
         run: |
+          BREW_PREFIX=$(brew --prefix)
           cmake -S ./vgmstream -B ./build \
                 -DBUILD_AUDACIOUS:BOOL=OFF \
                 -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
                 -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13 \
-                -DCMAKE_OSX_ARCHITECTURES=arm64
+                -DCMAKE_OSX_ARCHITECTURES=arm64 \
+                -DCMAKE_PREFIX_PATH="$BREW_PREFIX" \
+                -DCMAKE_EXE_LINKER_FLAGS="-L$BREW_PREFIX/lib"
           cmake --build ./build
 
       - name: Upload artifact (ARM64)
@@ -251,7 +254,7 @@ jobs:
           path: build/cli/vgmstream-cli
 
   build-macos-x86_64:
-    runs-on: macos-14
+    runs-on: macos-13
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -295,8 +298,9 @@ jobs:
           cmake -S ./vgmstream -B ./build \
                 -DBUILD_AUDACIOUS:BOOL=OFF \
                 -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
-                -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13
-          # macos-13 默认构建 x86_64，无需指定架构
+                -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13 \
+                -DCMAKE_PREFIX_PATH=/usr/local \
+                -DCMAKE_EXE_LINKER_FLAGS="-L/usr/local/lib"
           cmake --build ./build
 
       - name: Upload artifact (x86_64)
