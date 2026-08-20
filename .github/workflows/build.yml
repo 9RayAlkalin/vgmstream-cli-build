@@ -240,15 +240,23 @@ jobs:
           brew install autoconf automake ffmpeg libao libvorbis mpg123 libtool
 
       # ---- 构建 ARM64 ----
-      - name: Build ARM64
+      - name: Build x86_64
         run: |
-          eval "$(brew shellenv)"
-          cmake -S ./vgmstream -B ./build-arm64 \
+          # 强制链接器搜索 /usr/local/lib
+          export LDFLAGS="-L/usr/local/lib"
+          export CPPFLAGS="-I/usr/local/include"
+          export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig"
+    
+          cmake -S ./vgmstream -B ./build-x86_64 \
                 -DBUILD_AUDACIOUS:BOOL=OFF \
                 -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
                 -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13 \
-                -DCMAKE_OSX_ARCHITECTURES=arm64
-          cmake --build ./build-arm64
+                -DCMAKE_OSX_ARCHITECTURES=x86_64 \
+                -DCMAKE_PREFIX_PATH=/usr/local \
+                -DCMAKE_LIBRARY_PATH=/usr/local/lib \
+                -DMPG123_LIBRARY=/usr/local/lib/libmpg123.dylib \
+                -DMPG123_INCLUDE_DIR=/usr/local/include
+          cmake --build ./build-x86_64
 
       # ---- 安装 x86_64 依赖 ----
       - name: Install dependencies (x86_64)
