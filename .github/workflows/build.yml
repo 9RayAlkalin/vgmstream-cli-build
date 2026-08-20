@@ -233,64 +233,58 @@ jobs:
           version=$(git describe --tags --always)
           echo "version=$version" >> $GITHUB_OUTPUT
 
-      # ---- 安装 ARM64 依赖 ----
+      # ---- ARM64 构建 ----
       - name: Install dependencies (ARM64)
         run: |
-          eval "$(brew shellenv)"          # 默认指向 /opt/homebrew (ARM64)
+          eval "$(brew shellenv)"
           brew install autoconf automake ffmpeg libao libvorbis mpg123 libtool
 
-      # ---- 构建 ARM64 ----
+      - name: Build ARM64
+        run: |
+          eval "$(brew shellenv)"
+          cmake -S ./vgmstream -B ./build-arm64 \
+                -DBUILD_AUDACIOUS:BOOL=OFF \
+                -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
+                -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13 \
+                -DCMAKE_OSX_ARCHITECTURES=arm64
+          cmake --build ./build-arm64
+
+      # ---- x86_64 构建 ----
+      - name: Install dependencies (x86_64)
+        run: |
+          arch -x86_64 /usr/local/bin/brew install autoconf automake ffmpeg libao libvorbis mpg123 libtool
+          ls -l /usr/local/lib/libmpg123*
+  
       - name: Build x86_64
         run: |
-          # 强制链接器搜索 /usr/local/lib
           export LDFLAGS="-L/usr/local/lib"
           export CPPFLAGS="-I/usr/local/include"
           export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig"
-    
+          export LIBRARY_PATH="/usr/local/lib"
+
           cmake -S ./vgmstream -B ./build-x86_64 \
                 -DBUILD_AUDACIOUS:BOOL=OFF \
                 -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
                 -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13 \
                 -DCMAKE_OSX_ARCHITECTURES=x86_64 \
                 -DCMAKE_PREFIX_PATH=/usr/local \
-                -DCMAKE_LIBRARY_PATH=/usr/local/lib \
+                -DCMAKE_SYSTEM_LIBRARY_PATH=/usr/local/lib \
                 -DMPG123_LIBRARY=/usr/local/lib/libmpg123.dylib \
                 -DMPG123_INCLUDE_DIR=/usr/local/include
+
+          # 强行修改链接命令
+          find ./build-x86_64 -name link.txt -exec sed -i '' 's|-lmpg123|/usr/local/lib/libmpg123.dylib|g' {} \;
+
           cmake --build ./build-x86_64
 
-      # ---- 安装 x86_64 依赖 ----
-      - name: Install dependencies (x86_64)
-        run: |
-          # 使用 x86_64 的 Homebrew（位于 /usr/local）
-          arch -x86_64 /usr/local/bin/brew install autoconf automake ffmpeg libao libvorbis mpg123 libtool
-  
-      # ---- 构建 x86_64 ----
-      - name: Build x86_64
-        run: |
-          # 设置环境变量指向 x86_64 的库路径
-          export CMAKE_PREFIX_PATH=/usr/local
-          export CMAKE_LIBRARY_PATH=/usr/local/lib
-          cmake -S ./vgmstream -B ./build-x86_64 \
-                -DBUILD_AUDACIOUS:BOOL=OFF \
-                -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
-                -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13 \
-                -DCMAKE_OSX_ARCHITECTURES=x86_64 \
-                -DCMAKE_PREFIX_PATH=/usr/local \
-                -DCMAKE_LIBRARY_PATH=/usr/local/lib \
-                -DMPG123_LIBRARY=/usr/local/lib/libmpg123.dylib \
-                -DMPG123_INCLUDE_DIR=/usr/local/include \
-                -DCMAKE_EXE_LINKER_FLAGS="-L/usr/local/lib"
-          cmake --build ./build-x86_64
-
-      # ---- 合并为 Universal ----
+      # ---- 合并 Universal ----
       - name: Create Universal binary
         run: |
           mkdir -p universal
           lipo -create ./build-arm64/cli/vgmstream-cli ./build-x86_64/cli/vgmstream-cli \
                -output ./universal/vgmstream-cli
-          file ./universal/vgmstream-cli   # 验证
+          file ./universal/vgmstream-cli
 
-      # ---- 上传 Universal artifact ----
       - name: Upload artifact (macOS universal)
         uses: actions/upload-artifact@v4
         with:
